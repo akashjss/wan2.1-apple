@@ -32,7 +32,7 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
     # Now using 1000 ticks to represent 40 seconds (each tick = 40 ms)
     sub_bar = None
     sub_ticks = 0
-    sub_tick_total = 1000
+    sub_tick_total = 1500
     video_phase = False
 
     command = [
