@@ -13,16 +13,17 @@ snapshot_download(
 def infer(prompt, progress=gr.Progress(track_tqdm=True)):
 
     total_process_steps = 12
-    irrelevant_steps = 3
-    relevant_steps = total_process_steps - irrelevant_steps  # 9 steps
+    irrelevant_steps = 4
+    # Only the INFO messages from step 5 onward are relevant
+    relevant_steps = total_process_steps - irrelevant_steps  # 8 steps
 
-    # Create an overall process bar for the 9 relevant steps.
+    # Overall progress bar for the process steps (position=1 to appear below the generation bar)
     overall_bar = tqdm(total=relevant_steps, desc="Overall Process", position=1, dynamic_ncols=True, leave=True)
     processed_steps = 0
 
-    # Regex to extract the INFO message from each log line.
+    # Regex to extract the INFO message (everything after "INFO:")
     info_pattern = re.compile(r"\[.*?\]\s+INFO:\s+(.*)")
-    # Regex to capture progress lines from video generation (like " 10%|...| 5/50").
+    # Regex to capture progress lines for video generation (e.g., " 10%|...| 5/50")
     progress_pattern = re.compile(r"(\d+)%\|.*\| (\d+)/(\d+)")
     
     gen_progress_bar = None
@@ -52,41 +53,43 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
         if not stripped_line:
             continue
 
-        # Check if this line is a progress update for video generation.
+        # Check for a progress line (video generation progress)
         progress_match = progress_pattern.search(stripped_line)
         if progress_match:
             current = int(progress_match.group(2))
             total = int(progress_match.group(3))
             if gen_progress_bar is None:
                 gen_progress_bar = tqdm(total=total, desc="Video Generation", position=0, dynamic_ncols=True, leave=True)
-            # Update the generation progress bar by the difference.
+            # Update the video generation progress bar
             gen_progress_bar.update(current - gen_progress_bar.n)
             gen_progress_bar.refresh()
-            continue  # Skip further processing of this line.
+            continue  # Skip further processing of this line
 
-        # Check for an INFO log line.
+        # Check for an INFO log line
         info_match = info_pattern.search(stripped_line)
         if info_match:
             msg = info_match.group(1)
-            # Skip the first three INFO messages.
+            # Skip the first three INFO messages
             if processed_steps < irrelevant_steps:
                 processed_steps += 1
             else:
                 overall_bar.update(1)
-                # Compute the current percentage.
                 percentage = (overall_bar.n / overall_bar.total) * 100
-                # Set the description to include both the percentage and the current info title.
-                overall_bar.set_description(f"Overall Process - {percentage:.0f}% | {msg}")
-            # Write the log line as well.
+                # Update overall progress: description shows the percentage
+                overall_bar.set_description(f"Overall Process - {percentage:.1f}%")
+                # Postfix displays the current INFO message title
+                overall_bar.set_postfix_str(msg)
+                overall_bar.refresh()
+            # Also print the raw log message if needed
             tqdm.write(stripped_line)
         else:
             tqdm.write(stripped_line)
 
     process.wait()
-    if gen_progress_bar is not None:
+    if gen_progress_bar:
         gen_progress_bar.close()
     overall_bar.close()
-
+    
     if process.returncode == 0:
         print("Command executed successfully.")
         return "generated_video.mp4"
