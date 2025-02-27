@@ -11,21 +11,20 @@ snapshot_download(
 )
 
 def infer(prompt, progress=gr.Progress(track_tqdm=True)):
-
-    total_process_steps = 12
+    
+    total_process_steps = 11
     irrelevant_steps = 4
-    # Only the INFO messages from step 5 onward are relevant
-    relevant_steps = total_process_steps - irrelevant_steps  # 8 steps
+    relevant_steps = total_process_steps - irrelevant_steps  # 7 steps
 
-    # Overall progress bar for the process steps (position=1 to appear below the generation bar)
+    # Overall progress bar for relevant steps (position=1 so it appears below the generation bar)
     overall_bar = tqdm(total=relevant_steps, desc="Overall Process", position=1, dynamic_ncols=True, leave=True)
     processed_steps = 0
 
-    # Regex to extract the INFO message (everything after "INFO:")
-    info_pattern = re.compile(r"\[.*?\]\s+INFO:\s+(.*)")
-    # Regex to capture progress lines for video generation (e.g., " 10%|...| 5/50")
+    # Regex to extract the INFO message
+    info_pattern = re.compile(r"INFO:\s*(.*)")
+    # Regex to capture video generation progress lines (like "10%|...| 5/50")
     progress_pattern = re.compile(r"(\d+)%\|.*\| (\d+)/(\d+)")
-    
+
     gen_progress_bar = None
 
     command = [
@@ -53,31 +52,32 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
         if not stripped_line:
             continue
 
-        # Check for a progress line from the video generation process.
+        # Check for video generation progress lines
         progress_match = progress_pattern.search(stripped_line)
         if progress_match:
             current = int(progress_match.group(2))
             total = int(progress_match.group(3))
             if gen_progress_bar is None:
                 gen_progress_bar = tqdm(total=total, desc="Video Generation", position=0, dynamic_ncols=True, leave=True)
-            # Update the video generation progress bar
             gen_progress_bar.update(current - gen_progress_bar.n)
             gen_progress_bar.refresh()
-            continue  # Skip further processing of this line
+            continue
 
-        # Check for an INFO log line.
+        # Check for an INFO log line
         info_match = info_pattern.search(stripped_line)
         if info_match:
             msg = info_match.group(1)
-            # Skip the first three INFO messages.
+            # Skip the first three INFO messages
             if processed_steps < irrelevant_steps:
                 processed_steps += 1
             else:
                 overall_bar.update(1)
                 percentage = (overall_bar.n / overall_bar.total) * 100
+                # Set the overall bar description with both percentage and INFO message
                 overall_bar.set_description(f"Overall Process - {percentage:.1f}% | {msg}")
-            # Print the log message.
-            tqdm.write(stripped_line)
+                overall_bar.refresh()
+            # (Optional) If you don't want duplicate printing, omit printing the INFO line
+            # Otherwise, you could also print it separately with tqdm.write(stripped_line)
         else:
             tqdm.write(stripped_line)
 
