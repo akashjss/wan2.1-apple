@@ -14,25 +14,27 @@ snapshot_download(
 
 def infer(prompt, progress=gr.Progress(track_tqdm=True)):
     
-    # Configuration:
-    total_process_steps = 11          # Total steps (including irrelevant ones)
-    irrelevant_steps = 4              # First 4 INFO messages are skipped  
-    relevant_steps = total_process_steps - irrelevant_steps  # 7 overall steps
+    # Configuration
+    total_process_steps = 11          # Total INFO messages expected
+    irrelevant_steps = 4              # First 4 INFO messages are ignored
+    relevant_steps = total_process_steps - irrelevant_steps  # 7 overall (relevant) steps
 
-    # Create overall progress bar (level 1)
+    # Create overall process progress bar (Level 1)
     overall_bar = tqdm(total=relevant_steps, desc="Overall Process", position=1,
                        ncols=120, dynamic_ncols=False, leave=True)
     processed_steps = 0
 
-    # Regex for video generation progress (level 3)
+    # Regex for video generation progress (Level 3)
     progress_pattern = re.compile(r"(\d+)%\|.*\| (\d+)/(\d+)")
     video_progress_bar = None
 
-    # Variables for sub-step progress bar (level 2)
+    # Variables for sub-step progress bar (Level 2)
+    # We use a tick total of 500 ticks = 20 seconds (each tick = 40ms)
     sub_bar = None
-    sub_ticks = 0  # Each tick represents 40ms
-    sub_tick_total = 500  # 500 ticks * 0.04 sec = 20 seconds
-    video_phase = False
+    sub_ticks = 0
+    sub_tick_total = 500
+    # Flag indicating whether we're still waiting for the first relevant step.
+    waiting_for_first_relevant = True
 
     command = [
         "python", "-u", "-m", "generate",  # using -u for unbuffered output
@@ -52,7 +54,7 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
                                bufsize=1)
 
     while True:
-        # Poll for new stdout data with a 40 ms timeout.
+        # Poll stdout with a 40ms timeout.
         rlist, _, _ = select.select([process.stdout], [], [], 0.04)
         if rlist:
             line = process.stdout.readline()
@@ -62,10 +64,10 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
             if not stripped_line:
                 continue
 
-            # Check for video generation progress (level 3).
+            # Check if line matches video generation progress (Level 3)
             progress_match = progress_pattern.search(stripped_line)
             if progress_match:
-                # If a sub-step bar is active, finish it before entering video phase.
+                # Before entering video phase, cancel any active sub-step bar.
                 if sub_bar is not None:
                     if sub_ticks < sub_tick_total:
                         sub_bar.update(sub_tick_total - sub_ticks)
@@ -74,7 +76,7 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
                     overall_bar.refresh()
                     sub_bar = None
                     sub_ticks = 0
-                video_phase = True
+                # Enter video phase.
                 current = int(progress_match.group(2))
                 total = int(progress_match.group(3))
                 if video_progress_bar is None:
@@ -82,27 +84,34 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
                                               ncols=120, dynamic_ncols=True, leave=True)
                 video_progress_bar.update(current - video_progress_bar.n)
                 video_progress_bar.refresh()
+                # When video generation completes, update overall bar.
                 if video_progress_bar.n >= video_progress_bar.total:
-                    video_phase = False
                     overall_bar.update(1)
                     overall_bar.refresh()
                     video_progress_bar.close()
                     video_progress_bar = None
                 continue
 
-            # Process INFO messages (level 2 sub-step).
+            # Process INFO messages.
             if "INFO:" in stripped_line:
                 parts = stripped_line.split("INFO:", 1)
                 msg = parts[1].strip() if len(parts) > 1 else ""
-                print(stripped_line)  # Print log line
+                print(stripped_line)
 
+                # For the first 4 INFO messages, we simply increment processed_steps.
                 if processed_steps < irrelevant_steps:
                     processed_steps += 1
+                    # If we're waiting for the first relevant step, start a waiting sub-bar if not already started.
+                    if waiting_for_first_relevant and sub_bar is None:
+                        sub_bar = tqdm(total=sub_tick_total, desc="Waiting for first step...", position=2,
+                                       ncols=120, dynamic_ncols=False, leave=True)
+                        sub_ticks = 0
+                    # Continue reading logs.
+                    continue
                 else:
-                    # If in video phase, ignore new INFO messages.
-                    if video_phase:
-                        continue
-                    # If a sub-step is already active, finish it.
+                    # Now we are in the relevant phase.
+                    waiting_for_first_relevant = False
+                    # If a sub-bar exists (either waiting or from a previous step), finish it.
                     if sub_bar is not None:
                         if sub_ticks < sub_tick_total:
                             sub_bar.update(sub_tick_total - sub_ticks)
@@ -111,7 +120,7 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
                         overall_bar.refresh()
                         sub_bar = None
                         sub_ticks = 0
-                    # Start a new sub-step progress bar with total=500 ticks.
+                    # Start a new sub-step bar with the current INFO message.
                     sub_bar = tqdm(total=sub_tick_total, desc=msg, position=2,
                                    ncols=120, dynamic_ncols=False, leave=True)
                     sub_ticks = 0
@@ -119,13 +128,14 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
             else:
                 print(stripped_line)
         else:
-            # No new data within 40ms; update the sub-step progress bar.
+            # No new data within 40ms.
+            # If a sub-bar is active, update it.
             if sub_bar is not None:
                 sub_bar.update(1)
                 sub_ticks += 1
                 sub_bar.refresh()
                 if sub_ticks >= sub_tick_total:
-                    # 20 seconds have elapsed; complete this sub-step.
+                    # 20 seconds have elapsed; finish this sub-step.
                     sub_bar.close()
                     overall_bar.update(1)
                     overall_bar.refresh()
@@ -135,7 +145,7 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
         if process.poll() is not None:
             break
 
-    # Drain any remaining output.
+    # Drain remaining output.
     for line in process.stdout:
         print(line.strip())
     process.wait()
