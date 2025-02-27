@@ -18,6 +18,11 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
     irrelevant_steps = 4
     relevant_steps = total_process_steps - irrelevant_steps  # 7 steps
 
+    # Overall progress bar for the process steps.
+    overall_bar = tqdm(total=relevant_steps, desc="Overall Process", position=1,
+                       ncols=120, dynamic_ncols=False, leave=True)
+    processed_steps = 0
+
     # Regex for detecting video generation progress lines (e.g., "10%|...| 5/50")
     progress_pattern = re.compile(r"(\d+)%\|.*\| (\d+)/(\d+)")
     gen_progress_bar = None
