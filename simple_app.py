@@ -9,32 +9,40 @@ snapshot_download(
 )
 
 def infer(prompt):
-    prompt = "Two anthropomorphic cats in comfy boxing gear and bright gloves fight intensely on a spotlighted stage."
-    
+
     command = [
-        "python", "-m", "generate",
+        "python", "-u", "-m", "generate",  # using -u for unbuffered output and omitting .py extension
         "--task", "t2v-1.3B",
         "--size", "832*480",
         "--ckpt_dir", "./Wan2.1-T2V-1.3B",
         "--sample_shift", "8",
         "--sample_guide_scale", "6",
-        "--prompt", f"{prompt}",
+        "--prompt", prompt,
         "--save_file", "generated_video.mp4"
     ]
 
-    result = subprocess.run(command, capture_output=True, text=True)
+    # Start the process with unbuffered output and combine stdout and stderr.
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1  # line-buffered
+    )
 
-    # Print the standard output and error
-    print("STDOUT:", result.stdout)
-    print("STDERR:", result.stderr)
+    # Stream output in real time.
+    with process.stdout:
+        for line in iter(process.stdout.readline, ''):
+            print(line, end="")  # line already includes a newline
 
+    process.wait()
 
-    if result.returncode == 0:
+    if process.returncode == 0:
         print("Command executed successfully.")
         return "generated_video.mp4"
     else:
         print("Error executing command.")
-        raise gr.Error("Error executing command")
+        raise Exception("Error executing command")
 
 with gr.Blocks() as demo:
     with gr.Column():
