@@ -1,7 +1,7 @@
 import gradio as gr
 import re 
 import subprocess
-form tqdm import tqdm
+from tqdm import tqdm
 from huggingface_hub import snapshot_download
 
 #Download model
