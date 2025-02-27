@@ -1,6 +1,8 @@
 import gradio as gr
 import re 
 import subprocess
+import time
+import threading
 from tqdm import tqdm
 from huggingface_hub import snapshot_download
 
@@ -16,17 +18,30 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
     irrelevant_steps = 4
     relevant_steps = total_process_steps - irrelevant_steps  # 7 steps
 
-    # Create the overall progress bar for the process steps.
-    overall_bar = tqdm(total=relevant_steps, desc="Overall Process", position=1, dynamic_ncols=True, leave=True)
-    processed_steps = 0
-
-    # Regex for detecting video generation progress lines.
+    # Regex for detecting video generation progress lines (e.g., "10%|...| 5/50")
     progress_pattern = re.compile(r"(\d+)%\|.*\| (\d+)/(\d+)")
     gen_progress_bar = None
 
-    # We'll maintain a persistent sub-progress bar for the current step.
+    # Variables for managing the sub-progress bar for each step.
     current_sub_bar = None
+    current_timer = None
+    sub_lock = threading.Lock()
 
+    def close_sub_bar():
+        nonlocal current_sub_bar, current_timer, overall_bar
+        with sub_lock:
+            if current_sub_bar is not None:
+                try:
+                    # Ensure the sub-bar is complete.
+                    current_sub_bar.update(1 - current_sub_bar.n)
+                except Exception:
+                    pass
+                current_sub_bar.close()
+                overall_bar.update(1)
+                overall_bar.refresh()
+                current_sub_bar = None
+                current_timer = None
+    
     command = [
         "python", "-u", "-m", "generate",  # using -u for unbuffered output and omitting .py extension
         "--task", "t2v-1.3B",
@@ -59,43 +74,43 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
             total = int(progress_match.group(3))
             if gen_progress_bar is None:
                 gen_progress_bar = tqdm(total=total, desc="Video Generation", position=0,
-                                        dynamic_ncols=True, leave=True)
+                                        ncols=120, dynamic_ncols=True, leave=True)
             gen_progress_bar.update(current - gen_progress_bar.n)
             gen_progress_bar.refresh()
             continue
 
         # Check for INFO lines.
         if "INFO:" in stripped_line:
-            # Extract the INFO message.
             parts = stripped_line.split("INFO:", 1)
             msg = parts[1].strip() if len(parts) > 1 else ""
-            tqdm.write(stripped_line)  # print the log line
+            tqdm.write(stripped_line)  # Print the log line
 
-            # Skip the first few irrelevant INFO lines.
             if processed_steps < irrelevant_steps:
                 processed_steps += 1
             else:
-                # If there's a current sub-progress bar, mark it complete and close it.
-                if current_sub_bar is not None:
-                    current_sub_bar.update(1)
-                    current_sub_bar.close()
-                    overall_bar.update(1)
-                    overall_bar.refresh()
-                # Now create a new sub-progress bar for this new step.
-                # (It will remain visible until the next INFO message arrives.)
-                current_sub_bar = tqdm(total=1, desc=msg, position=2,
-                                       ncols=120, dynamic_ncols=False, leave=True)
+                with sub_lock:
+                    # If a sub-bar is active, cancel its timer and close it immediately.
+                    if current_sub_bar is not None:
+                        if current_timer is not None:
+                            current_timer.cancel()
+                        close_sub_bar()
+                    # Create a new sub-bar for the current step.
+                    current_sub_bar = tqdm(total=1, desc=msg, position=2,
+                                           ncols=120, dynamic_ncols=False, leave=True)
+                    # Start a timer to automatically close this sub-bar after 20 seconds.
+                    current_timer = threading.Timer(20, close_sub_bar)
+                    current_timer.start()
+            continue
+
         else:
             tqdm.write(stripped_line)
 
-    # When process ends, if there's an open sub-bar, finish it.
-    if current_sub_bar is not None:
-        current_sub_bar.update(1)
-        current_sub_bar.close()
-        overall_bar.update(1)
-        overall_bar.refresh()
-
     process.wait()
+    # Clean up: if a sub-bar is still active, close it.
+    if current_timer is not None:
+        current_timer.cancel()
+    if current_sub_bar is not None:
+        close_sub_bar()
     if gen_progress_bar:
         gen_progress_bar.close()
     overall_bar.close()
