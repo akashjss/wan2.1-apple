@@ -37,17 +37,18 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
     progress_pattern = re.compile(r"(\d+)%\|.*\| (\d+)/(\d+)")
     
     for line in iter(process.stdout.readline, ''):
-        # Try to parse progress info from the line
         match = progress_pattern.search(line)
         if match:
+            # Update tqdm without printing the line to logs
             current = int(match.group(2))
             total = int(match.group(3))
             if progress_bar is None:
-                progress_bar = tqdm(total=total, desc="Video Generation Progress")
-            # Update the progress bar only if progress has advanced
+                progress_bar = tqdm(total=total, desc="Video Generation Progress", leave=True)
             progress_bar.update(current - progress_bar.n)
+            # Optionally, refresh the tqdm display without a newline:
+            progress_bar.refresh()
         else:
-            # Print any other log lines as they are
+            # For non-progress lines, print them normally
             print(line, end="")
 
     process.wait()
