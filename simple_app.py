@@ -1,5 +1,7 @@
 import gradio as gr
+import re 
 import subprocess
+form tqdm import tqdm
 from huggingface_hub import snapshot_download
 
 #Download model
@@ -8,7 +10,7 @@ snapshot_download(
     local_dir = "./Wan2.1-T2V-1.3B"
 )
 
-def infer(prompt):
+def infer(prompt, progress=gr.Progress(track_tqdm=True)):
 
     command = [
         "python", "-u", "-m", "generate",  # using -u for unbuffered output and omitting .py extension
@@ -30,12 +32,27 @@ def infer(prompt):
         bufsize=1  # line-buffered
     )
 
-    # Stream output in real time.
-    with process.stdout:
-        for line in iter(process.stdout.readline, ''):
-            print(line, end="")  # line already includes a newline
+    progress_bar = None
+    # Regex pattern to capture lines like " 10%|█         | 5/50"
+    progress_pattern = re.compile(r"(\d+)%\|.*\| (\d+)/(\d+)")
+    
+    for line in iter(process.stdout.readline, ''):
+        # Try to parse progress info from the line
+        match = progress_pattern.search(line)
+        if match:
+            current = int(match.group(2))
+            total = int(match.group(3))
+            if progress_bar is None:
+                progress_bar = tqdm(total=total, desc="Video Generation Progress")
+            # Update the progress bar only if progress has advanced
+            progress_bar.update(current - progress_bar.n)
+        else:
+            # Print any other log lines as they are
+            print(line, end="")
 
     process.wait()
+    if progress_bar is not None:
+        progress_bar.close()
 
     if process.returncode == 0:
         print("Command executed successfully.")
