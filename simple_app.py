@@ -20,11 +20,9 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
     overall_bar = tqdm(total=relevant_steps, desc="Overall Process", position=1, dynamic_ncols=True, leave=True)
     processed_steps = 0
 
-    # Regex to extract the INFO message (everything after "INFO:")
-    info_pattern = re.compile(r"\[.*?\]\s+INFO:\s+(.*)")
     # Regex to capture video generation progress lines (e.g., " 10%|...| 5/50")
     progress_pattern = re.compile(r"(\d+)%\|.*\| (\d+)/(\d+)")
-
+    
     gen_progress_bar = None
 
     command = [
@@ -64,19 +62,20 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
             gen_progress_bar.refresh()
             continue  # Skip further processing for progress lines
 
-        # Check if this is an INFO log line.
-        info_match = info_pattern.search(stripped_line)
-        if info_match:
-            msg = info_match.group(1)
+        # Now check if the line contains an "INFO:" message.
+        if "INFO:" in stripped_line:
+            # Use split to capture everything after "INFO:".
+            parts = stripped_line.split("INFO:", 1)
+            msg = parts[1].strip() if len(parts) > 1 else ""
             # Print the raw log line.
             tqdm.write(stripped_line)
-            # For relevant steps (after the first three), update the overall progress bar.
+            # For relevant steps (after the first three), update the overall progress.
             if processed_steps < irrelevant_steps:
                 processed_steps += 1
             else:
                 overall_bar.update(1)
                 percentage = (overall_bar.n / overall_bar.total) * 100
-                # Directly insert the INFO message in the description.
+                # Directly insert the INFO message into the description.
                 overall_bar.set_description(f"Overall Process - {percentage:.1f}% | {msg}")
                 overall_bar.refresh()
         else:
