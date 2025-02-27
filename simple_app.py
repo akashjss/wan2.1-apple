@@ -53,7 +53,7 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
         if not stripped_line:
             continue
 
-        # Check for a progress line (video generation progress)
+        # Check for a progress line from the video generation process.
         progress_match = progress_pattern.search(stripped_line)
         if progress_match:
             current = int(progress_match.group(2))
@@ -65,22 +65,18 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
             gen_progress_bar.refresh()
             continue  # Skip further processing of this line
 
-        # Check for an INFO log line
+        # Check for an INFO log line.
         info_match = info_pattern.search(stripped_line)
         if info_match:
             msg = info_match.group(1)
-            # Skip the first three INFO messages
+            # Skip the first three INFO messages.
             if processed_steps < irrelevant_steps:
                 processed_steps += 1
             else:
                 overall_bar.update(1)
                 percentage = (overall_bar.n / overall_bar.total) * 100
-                # Update overall progress: description shows the percentage
-                overall_bar.set_description(f"Overall Process - {percentage:.1f}%")
-                # Postfix displays the current INFO message title
-                overall_bar.set_postfix_str(msg)
-                overall_bar.refresh()
-            # Also print the raw log message if needed
+                overall_bar.set_description(f"Overall Process - {percentage:.1f}% | {msg}")
+            # Print the log message.
             tqdm.write(stripped_line)
         else:
             tqdm.write(stripped_line)
