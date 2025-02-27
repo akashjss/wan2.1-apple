@@ -12,18 +12,17 @@ snapshot_download(
 
 def infer(prompt, progress=gr.Progress(track_tqdm=True)):
 
-    # Total process steps is 12; the first three are irrelevant so we count 9 relevant steps.
     total_process_steps = 12
     irrelevant_steps = 3
     relevant_steps = total_process_steps - irrelevant_steps  # 9 steps
 
-    # This bar will track the overall process (steps 4 to 12)
+    # Create an overall process bar for the 9 relevant steps.
     overall_bar = tqdm(total=relevant_steps, desc="Overall Process", position=1, dynamic_ncols=True, leave=True)
     processed_steps = 0
 
-    # Regex to extract the INFO message (everything after "INFO:")
+    # Regex to extract the INFO message from each log line.
     info_pattern = re.compile(r"\[.*?\]\s+INFO:\s+(.*)")
-    # Regex to capture progress lines for video generation (e.g., " 10%|...| 5/50")
+    # Regex to capture progress lines from video generation (like " 10%|...| 5/50").
     progress_pattern = re.compile(r"(\d+)%\|.*\| (\d+)/(\d+)")
     
     gen_progress_bar = None
@@ -53,7 +52,7 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
         if not stripped_line:
             continue
 
-        # Check for a progress line from the video generation process.
+        # Check if this line is a progress update for video generation.
         progress_match = progress_pattern.search(stripped_line)
         if progress_match:
             current = int(progress_match.group(2))
@@ -69,21 +68,22 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
         info_match = info_pattern.search(stripped_line)
         if info_match:
             msg = info_match.group(1)
-
             # Skip the first three INFO messages.
             if processed_steps < irrelevant_steps:
                 processed_steps += 1
             else:
                 overall_bar.update(1)
-                overall_bar.set_description(f"Overall: {msg}")
-            # Print the log message.
+                # Compute the current percentage.
+                percentage = (overall_bar.n / overall_bar.total) * 100
+                # Set the description to include both the percentage and the current info title.
+                overall_bar.set_description(f"Overall Process - {percentage:.0f}% | {msg}")
+            # Write the log line as well.
             tqdm.write(stripped_line)
         else:
-            # Print any other lines.
             tqdm.write(stripped_line)
 
     process.wait()
-    if gen_progress_bar:
+    if gen_progress_bar is not None:
         gen_progress_bar.close()
     overall_bar.close()
 
