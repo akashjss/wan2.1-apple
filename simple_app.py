@@ -24,6 +24,11 @@ def infer(prompt):
 
     result = subprocess.run(command, capture_output=True, text=True)
 
+    # Print the standard output and error
+    print("STDOUT:", result.stdout)
+    print("STDERR:", result.stderr)
+
+
     if result.returncode == 0:
         print("Command executed successfully.")
         return "./tmp/generated_video.mp4"
