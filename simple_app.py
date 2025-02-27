@@ -19,7 +19,7 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
     irrelevant_steps = 4              # First 4 INFO messages are ignored  
     relevant_steps = total_process_steps - irrelevant_steps  # 7 overall steps
 
-    # Create overall process progress bar (Level 1)
+    # Create overall progress bar (Level 1)
     overall_bar = tqdm(total=relevant_steps, desc="Overall Process", position=1,
                        ncols=120, dynamic_ncols=False, leave=True)
     processed_steps = 0
@@ -29,10 +29,10 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
     video_progress_bar = None
 
     # Variables for sub-step progress bar (Level 2)
-    # We'll use 500 ticks to represent 20 seconds (each tick = 40 ms)
+    # Now using 1000 ticks to represent 40 seconds (each tick = 40 ms)
     sub_bar = None
     sub_ticks = 0
-    sub_tick_total = 500
+    sub_tick_total = 1000
     video_phase = False
 
     command = [
@@ -52,7 +52,6 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
                                text=True,
                                bufsize=1)
 
-    # Main polling loop
     while True:
         # Poll stdout with a 40ms timeout.
         rlist, _, _ = select.select([process.stdout], [], [], 0.04)
@@ -76,7 +75,6 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
                     overall_bar.refresh()
                     sub_bar = None
                     sub_ticks = 0
-                    waiting_for_first_relevant = False
                 video_phase = True
                 current = int(progress_match.group(2))
                 total = int(progress_match.group(3))
@@ -102,8 +100,6 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
                 # For the first 4 INFO messages, simply count them.
                 if processed_steps < irrelevant_steps:
                     processed_steps += 1
-                    # Optionally, you could start a waiting bar here if desired.
-                    # But if not, just continue.
                     continue
                 else:
                     # A new relevant INFO message has arrived.
@@ -116,7 +112,7 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
                         overall_bar.refresh()
                         sub_bar = None
                         sub_ticks = 0
-                    # Start a new sub-step bar with the current INFO message.
+                    # Start a new sub-step bar for the current INFO message.
                     sub_bar = tqdm(total=sub_tick_total, desc=msg, position=2,
                                    ncols=120, dynamic_ncols=False, leave=True)
                     sub_ticks = 0
@@ -126,12 +122,11 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
         else:
             # No new data within 40ms.
             if sub_bar is not None:
-                # Only update the sub-bar if it hasn't yet reached its maximum.
                 if sub_ticks < sub_tick_total:
                     sub_bar.update(1)
                     sub_ticks += 1
                     sub_bar.refresh()
-                # If it is full, do nothing; just wait for the next INFO message.
+                # If full (40 seconds reached), do not advance overall step—just remain waiting.
         if process.poll() is not None:
             break
 
