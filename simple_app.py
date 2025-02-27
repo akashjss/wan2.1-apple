@@ -34,7 +34,7 @@ def infer(prompt):
 with gr.Blocks() as demo:
     with gr.Column():
         gr.Markdown("# Wan 2.1")
-        prompt = gr.Textbox(labe="Prompt")
+        prompt = gr.Textbox(label="Prompt")
         submit_btn = gr.Button("Submit")
         video_res = gr.Video(label="Generated Video")
 
