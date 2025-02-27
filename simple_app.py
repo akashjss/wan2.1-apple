@@ -14,7 +14,7 @@ snapshot_download(
 
 def infer(prompt, progress=gr.Progress(track_tqdm=True)):
     
-   total_process_steps = 11
+    total_process_steps = 11
     irrelevant_steps = 4
     relevant_steps = total_process_steps - irrelevant_steps  # 7 steps
 
