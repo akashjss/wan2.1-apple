@@ -73,8 +73,9 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
             else:
                 overall_bar.update(1)
                 percentage = (overall_bar.n / overall_bar.total) * 100
-                # Directly assign to the description property.
-                overall_bar.desc = f"Overall Process - {percentage:.1f}% | {msg}"
+                overall_bar.set_description(f"Overall Process - {percentage:.1f}%")
+                overall_bar.set_postfix_str(msg)
+                print(msg)
                 overall_bar.refresh()
         else:
             # Print any other lines.
