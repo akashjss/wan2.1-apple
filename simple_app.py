@@ -16,10 +16,10 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
     
     # Configuration:
     total_process_steps = 11          # Total INFO messages expected
-    irrelevant_steps = 4              # First 4 INFO messages are ignored
+    irrelevant_steps = 4              # First 4 INFO messages are ignored  
     relevant_steps = total_process_steps - irrelevant_steps  # 7 overall steps
 
-    # Create overall progress bar (Level 1)
+    # Create overall process progress bar (Level 1)
     overall_bar = tqdm(total=relevant_steps, desc="Overall Process", position=1,
                        ncols=120, dynamic_ncols=False, leave=True)
     processed_steps = 0
@@ -29,16 +29,14 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
     video_progress_bar = None
 
     # Variables for sub-step progress bar (Level 2)
-    # We use 500 ticks to represent 20 seconds (each tick = 40 ms)
+    # We'll use 500 ticks to represent 20 seconds (each tick = 40 ms)
     sub_bar = None
     sub_ticks = 0
     sub_tick_total = 500
-
-    # Flag to indicate we're still waiting for the first relevant INFO message.
-    waiting_for_first_relevant = True
+    video_phase = False
 
     command = [
-        "python", "-u", "-m", "generate",  # -u: unbuffered output
+        "python", "-u", "-m", "generate",  # using -u for unbuffered output
         "--task", "t2v-1.3B",
         "--size", "832*480",
         "--ckpt_dir", "./Wan2.1-T2V-1.3B",
@@ -54,8 +52,9 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
                                text=True,
                                bufsize=1)
 
+    # Main polling loop
     while True:
-        # Poll stdout with a timeout of 40 ms.
+        # Poll stdout with a 40ms timeout.
         rlist, _, _ = select.select([process.stdout], [], [], 0.04)
         if rlist:
             line = process.stdout.readline()
@@ -65,7 +64,7 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
             if not stripped_line:
                 continue
 
-            # Check for video generation progress (Level 3).
+            # Check for video generation progress (Level 3)
             progress_match = progress_pattern.search(stripped_line)
             if progress_match:
                 # If a sub-step bar is active, finish it before entering video phase.
@@ -78,6 +77,7 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
                     sub_bar = None
                     sub_ticks = 0
                     waiting_for_first_relevant = False
+                video_phase = True
                 current = int(progress_match.group(2))
                 total = int(progress_match.group(3))
                 if video_progress_bar is None:
@@ -86,50 +86,37 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
                 video_progress_bar.update(current - video_progress_bar.n)
                 video_progress_bar.refresh()
                 if video_progress_bar.n >= video_progress_bar.total:
+                    video_phase = False
                     overall_bar.update(1)
                     overall_bar.refresh()
                     video_progress_bar.close()
                     video_progress_bar = None
                 continue
 
-            # Process INFO messages.
+            # Process INFO messages (Level 2 sub-step)
             if "INFO:" in stripped_line:
                 parts = stripped_line.split("INFO:", 1)
                 msg = parts[1].strip() if len(parts) > 1 else ""
                 print(stripped_line)  # Log the message
 
+                # For the first 4 INFO messages, simply count them.
                 if processed_steps < irrelevant_steps:
                     processed_steps += 1
-                    # While waiting for the first relevant INFO, ensure a waiting sub-bar is running.
-                    if waiting_for_first_relevant and sub_bar is None:
-                        sub_bar = tqdm(total=sub_tick_total, desc="Waiting for first step...", position=2,
-                                       ncols=120, dynamic_ncols=False, leave=True)
-                        sub_ticks = 0
+                    # Optionally, you could start a waiting bar here if desired.
+                    # But if not, just continue.
                     continue
                 else:
-                    # We have reached the first relevant INFO message.
-                    if waiting_for_first_relevant:
-                        waiting_for_first_relevant = False
-                        # Cancel the waiting sub-bar.
-                        if sub_bar is not None:
-                            if sub_ticks < sub_tick_total:
-                                sub_bar.update(sub_tick_total - sub_ticks)
-                            sub_bar.close()
-                            overall_bar.update(1)
-                            overall_bar.refresh()
-                            sub_bar = None
-                            sub_ticks = 0
-                    else:
-                        # If a sub-bar is active from a previous step, finish it.
-                        if sub_bar is not None:
-                            if sub_ticks < sub_tick_total:
-                                sub_bar.update(sub_tick_total - sub_ticks)
-                            sub_bar.close()
-                            overall_bar.update(1)
-                            overall_bar.refresh()
-                            sub_bar = None
-                            sub_ticks = 0
-                    # Now start a new sub-step bar for the current INFO message.
+                    # A new relevant INFO message has arrived.
+                    # If a sub-bar exists (whether full or not), finish it now.
+                    if sub_bar is not None:
+                        if sub_ticks < sub_tick_total:
+                            sub_bar.update(sub_tick_total - sub_ticks)
+                        sub_bar.close()
+                        overall_bar.update(1)
+                        overall_bar.refresh()
+                        sub_bar = None
+                        sub_ticks = 0
+                    # Start a new sub-step bar with the current INFO message.
                     sub_bar = tqdm(total=sub_tick_total, desc=msg, position=2,
                                    ncols=120, dynamic_ncols=False, leave=True)
                     sub_ticks = 0
@@ -137,26 +124,18 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
             else:
                 print(stripped_line)
         else:
-            # No new stdout data within 40 ms.
-            # If we're waiting for the first relevant step and no sub-bar exists, create it.
-            if waiting_for_first_relevant and sub_bar is None:
-                sub_bar = tqdm(total=sub_tick_total, desc="Waiting for first step...", position=2,
-                               ncols=120, dynamic_ncols=False, leave=True)
-                sub_ticks = 0
+            # No new data within 40ms.
             if sub_bar is not None:
-                sub_bar.update(1)
-                sub_ticks += 1
-                sub_bar.refresh()
-                if sub_ticks >= sub_tick_total:
-                    sub_bar.close()
-                    overall_bar.update(1)
-                    overall_bar.refresh()
-                    sub_bar = None
-                    sub_ticks = 0
+                # Only update the sub-bar if it hasn't yet reached its maximum.
+                if sub_ticks < sub_tick_total:
+                    sub_bar.update(1)
+                    sub_ticks += 1
+                    sub_bar.refresh()
+                # If it is full, do nothing; just wait for the next INFO message.
         if process.poll() is not None:
             break
 
-    # Drain remaining output.
+    # Drain any remaining output.
     for line in process.stdout:
         print(line.strip())
     process.wait()
