@@ -12,6 +12,22 @@ snapshot_download(
 
 def infer(prompt, progress=gr.Progress(track_tqdm=True)):
 
+    # Total process steps is 12; the first three are irrelevant so we count 9 relevant steps.
+    total_process_steps = 12
+    irrelevant_steps = 3
+    relevant_steps = total_process_steps - irrelevant_steps  # 9 steps
+
+    # This bar will track the overall process (steps 4 to 12)
+    overall_bar = tqdm(total=relevant_steps, desc="Overall Process", position=1, dynamic_ncols=True, leave=True)
+    processed_steps = 0
+
+    # Regex to extract the INFO message (everything after "INFO:")
+    info_pattern = re.compile(r"\[.*?\]\s+INFO:\s+(.*)")
+    # Regex to capture progress lines for video generation (e.g., " 10%|...| 5/50")
+    progress_pattern = re.compile(r"(\d+)%\|.*\| (\d+)/(\d+)")
+    
+    gen_progress_bar = None
+
     command = [
         "python", "-u", "-m", "generate",  # using -u for unbuffered output and omitting .py extension
         "--task", "t2v-1.3B",
@@ -32,43 +48,44 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
         bufsize=1  # line-buffered
     )
 
-    # This bar will track the generation progress (extracted from the stdout progress lines)
-    gen_progress_bar = None
-    # This bar will "simulate" a progress update for each log line (non-progress messages).
-    # We start with a total of 0 and update its total dynamically.
-    log_progress_bar = tqdm(total=0, desc="Logs", position=1, dynamic_ncols=True, leave=True)
-    
-    progress_pattern = re.compile(r"(\d+)%\|.*\| (\d+)/(\d+)")
-    
     for line in iter(process.stdout.readline, ''):
-        # Remove whitespace so we can check for empty lines.
         stripped_line = line.strip()
         if not stripped_line:
             continue
-        
-        # Check if the line matches the progress bar format from the external process.
-        match = progress_pattern.search(stripped_line)
-        if match:
-            # Extract current step and total from the match.
-            current = int(match.group(2))
-            total = int(match.group(3))
+
+        # Check for a progress line from the video generation process.
+        progress_match = progress_pattern.search(stripped_line)
+        if progress_match:
+            current = int(progress_match.group(2))
+            total = int(progress_match.group(3))
             if gen_progress_bar is None:
-                gen_progress_bar = tqdm(total=total, desc="Video Generation Progress", position=0, dynamic_ncols=True, leave=True)
-            # Update generation progress (ensuring we only advance by the difference)
+                gen_progress_bar = tqdm(total=total, desc="Video Generation", position=0, dynamic_ncols=True, leave=True)
+            # Update the generation progress bar by the difference.
             gen_progress_bar.update(current - gen_progress_bar.n)
             gen_progress_bar.refresh()
-        else:
-            # For any log line that is not part of the progress output, update the fake log track.
-            # Increase the total count by one and update one step.
-            log_progress_bar.total += 1
-            log_progress_bar.update(1)
-            # Write the log line so it appears in order above the progress bars.
+            continue  # Skip further processing of this line.
+
+        # Check for an INFO log line.
+        info_match = info_pattern.search(stripped_line)
+        if info_match:
+            msg = info_match.group(1)
+
+            # Skip the first three INFO messages.
+            if processed_steps < irrelevant_steps:
+                processed_steps += 1
+            else:
+                overall_bar.update(1)
+                overall_bar.set_description(f"Overall: {msg}")
+            # Print the log message.
             tqdm.write(stripped_line)
-    
+        else:
+            # Print any other lines.
+            tqdm.write(stripped_line)
+
     process.wait()
-    if gen_progress_bar is not None:
+    if gen_progress_bar:
         gen_progress_bar.close()
-    log_progress_bar.close()
+    overall_bar.close()
 
     if process.returncode == 0:
         print("Command executed successfully.")
