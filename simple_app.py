@@ -16,11 +16,11 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
     irrelevant_steps = 4
     relevant_steps = total_process_steps - irrelevant_steps  # 7 steps
 
-    # Create an overall progress bar.
+    # Create the overall progress bar for the process steps.
     overall_bar = tqdm(total=relevant_steps, desc="Overall Process", position=1, dynamic_ncols=True, leave=True)
     processed_steps = 0
 
-    # Regex for progress lines (e.g. "10%|...| 5/50")
+    # Regex for detecting video generation progress lines (e.g., "10%|...| 5/50")
     progress_pattern = re.compile(r"(\d+)%\|.*\| (\d+)/(\d+)")
     gen_progress_bar = None
 
@@ -44,13 +44,12 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
         bufsize=1  # line-buffered
     )
 
-    last_msg = ""
     for line in iter(process.stdout.readline, ''):
         stripped_line = line.strip()
         if not stripped_line:
             continue
 
-        # Check for video generation progress lines.
+        # Check if this is a video generation progress line.
         progress_match = progress_pattern.search(stripped_line)
         if progress_match:
             current = int(progress_match.group(2))
@@ -61,23 +60,25 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
             gen_progress_bar.refresh()
             continue
 
-        # Process INFO lines.
+        # Check for INFO lines.
         if "INFO:" in stripped_line:
+            # Split the line at "INFO:" to extract the message.
             parts = stripped_line.split("INFO:", 1)
             msg = parts[1].strip() if len(parts) > 1 else ""
             # Print the log line.
-            tqdm.write(stripped_line)
+            print(stripped_line)
+            # Skip updating the overall bar for the first three (irrelevant) steps.
             if processed_steps < irrelevant_steps:
                 processed_steps += 1
             else:
                 overall_bar.update(1)
                 percentage = (overall_bar.n / overall_bar.total) * 100
-                last_msg = msg
-                # Instead of set_description(), try set_description_str()
-                overall_bar.set_description_str(f"Overall Process - {percentage:.1f}% | {last_msg}")
+                # Directly assign to the description property.
+                overall_bar.desc = f"Overall Process - {percentage:.1f}% | {msg}"
                 overall_bar.refresh()
         else:
-            tqdm.write(stripped_line)
+            # Print any other lines.
+            print(stripped_line)
 
     process.wait()
     if gen_progress_bar:
