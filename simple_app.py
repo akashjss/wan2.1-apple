@@ -20,9 +20,9 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
     overall_bar = tqdm(total=relevant_steps, desc="Overall Process", position=1, dynamic_ncols=True, leave=True)
     processed_steps = 0
 
-    # Regex to extract the INFO message
-    info_pattern = re.compile(r"INFO:\s*(.*)")
-    # Regex to capture video generation progress lines (like "10%|...| 5/50")
+    # Regex to extract the INFO message (everything after "INFO:")
+    info_pattern = re.compile(r"\[.*?\]\s+INFO:\s+(.*)")
+    # Regex to capture video generation progress lines (e.g. " 10%|...| 5/50")
     progress_pattern = re.compile(r"(\d+)%\|.*\| (\d+)/(\d+)")
 
     gen_progress_bar = None
@@ -52,33 +52,34 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
         if not stripped_line:
             continue
 
-        # Check for video generation progress lines
+        # Check if this is a video generation progress line.
         progress_match = progress_pattern.search(stripped_line)
         if progress_match:
             current = int(progress_match.group(2))
             total = int(progress_match.group(3))
             if gen_progress_bar is None:
                 gen_progress_bar = tqdm(total=total, desc="Video Generation", position=0, dynamic_ncols=True, leave=True)
+            # Update video generation progress.
             gen_progress_bar.update(current - gen_progress_bar.n)
             gen_progress_bar.refresh()
-            continue
+            continue  # Skip further processing for progress lines
 
-        # Check for an INFO log line
+        # Check if this is an INFO log line.
         info_match = info_pattern.search(stripped_line)
         if info_match:
             msg = info_match.group(1)
-            # Skip the first three INFO messages
+            # Always print the log line.
+            tqdm.write(stripped_line)
+            # For relevant steps (i.e. after the first three), update the overall progress.
             if processed_steps < irrelevant_steps:
                 processed_steps += 1
             else:
                 overall_bar.update(1)
                 percentage = (overall_bar.n / overall_bar.total) * 100
-                # Set the overall bar description with both percentage and INFO message
                 overall_bar.set_description(f"Overall Process - {percentage:.1f}% | {msg}")
                 overall_bar.refresh()
-            # (Optional) If you don't want duplicate printing, omit printing the INFO line
-            # Otherwise, you could also print it separately with tqdm.write(stripped_line)
         else:
+            # For any other line, print it.
             tqdm.write(stripped_line)
 
     process.wait()
