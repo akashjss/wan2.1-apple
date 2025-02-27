@@ -32,31 +32,43 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
         bufsize=1  # line-buffered
     )
 
-    progress_bar = None
-    # Regex pattern to capture lines like " 10%|█         | 5/50"
+    # This bar will track the generation progress (extracted from the stdout progress lines)
+    gen_progress_bar = None
+    # This bar will "simulate" a progress update for each log line (non-progress messages).
+    # We start with a total of 0 and update its total dynamically.
+    log_progress_bar = tqdm(total=0, desc="Logs", position=1, dynamic_ncols=True, leave=True)
+    
     progress_pattern = re.compile(r"(\d+)%\|.*\| (\d+)/(\d+)")
     
     for line in iter(process.stdout.readline, ''):
-        # Remove any carriage returns/newlines from the line
+        # Remove whitespace so we can check for empty lines.
         stripped_line = line.strip()
-        # Skip empty lines
         if not stripped_line:
             continue
-
+        
+        # Check if the line matches the progress bar format from the external process.
         match = progress_pattern.search(stripped_line)
         if match:
+            # Extract current step and total from the match.
             current = int(match.group(2))
             total = int(match.group(3))
-            if progress_bar is None:
-                progress_bar = tqdm(total=total, desc="Video Generation Progress", leave=True)
-            progress_bar.update(current - progress_bar.n)
-            progress_bar.refresh()
+            if gen_progress_bar is None:
+                gen_progress_bar = tqdm(total=total, desc="Video Generation Progress", position=0, dynamic_ncols=True, leave=True)
+            # Update generation progress (ensuring we only advance by the difference)
+            gen_progress_bar.update(current - gen_progress_bar.n)
+            gen_progress_bar.refresh()
         else:
-            print(line, end="")  # Print other output normally
-
+            # For any log line that is not part of the progress output, update the fake log track.
+            # Increase the total count by one and update one step.
+            log_progress_bar.total += 1
+            log_progress_bar.update(1)
+            # Write the log line so it appears in order above the progress bars.
+            tqdm.write(stripped_line)
+    
     process.wait()
-    if progress_bar is not None:
-        progress_bar.close()
+    if gen_progress_bar is not None:
+        gen_progress_bar.close()
+    log_progress_bar.close()
 
     if process.returncode == 0:
         print("Command executed successfully.")
