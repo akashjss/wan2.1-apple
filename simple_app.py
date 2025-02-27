@@ -9,7 +9,7 @@ snapshot_download(
 )
 
 def infer(prompt):
-    prompt = ""Two anthropomorphic cats in comfy boxing gear and bright gloves fight intensely on a spotlighted stage.""
+    prompt = "Two anthropomorphic cats in comfy boxing gear and bright gloves fight intensely on a spotlighted stage."
     
     command = [
         "python", "-m", "generate.py",
