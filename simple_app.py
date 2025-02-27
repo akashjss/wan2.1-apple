@@ -20,9 +20,12 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
     overall_bar = tqdm(total=relevant_steps, desc="Overall Process", position=1, dynamic_ncols=True, leave=True)
     processed_steps = 0
 
-    # Regex for detecting video generation progress lines (e.g., "10%|...| 5/50")
+    # Regex for detecting video generation progress lines.
     progress_pattern = re.compile(r"(\d+)%\|.*\| (\d+)/(\d+)")
     gen_progress_bar = None
+
+    # We'll maintain a persistent sub-progress bar for the current step.
+    current_sub_bar = None
 
     command = [
         "python", "-u", "-m", "generate",  # using -u for unbuffered output and omitting .py extension
@@ -55,32 +58,42 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
             current = int(progress_match.group(2))
             total = int(progress_match.group(3))
             if gen_progress_bar is None:
-                gen_progress_bar = tqdm(total=total, desc="Video Generation", position=0, dynamic_ncols=True, leave=True)
+                gen_progress_bar = tqdm(total=total, desc="Video Generation", position=0,
+                                        dynamic_ncols=True, leave=True)
             gen_progress_bar.update(current - gen_progress_bar.n)
             gen_progress_bar.refresh()
             continue
 
         # Check for INFO lines.
         if "INFO:" in stripped_line:
-            # Extract the text after "INFO:"
+            # Extract the INFO message.
             parts = stripped_line.split("INFO:", 1)
             msg = parts[1].strip() if len(parts) > 1 else ""
-            # Print the log line.
-            print(stripped_line)
-            # Skip updating the overall bar for the first few irrelevant steps.
+            tqdm.write(stripped_line)  # print the log line
+
+            # Skip the first few irrelevant INFO lines.
             if processed_steps < irrelevant_steps:
                 processed_steps += 1
             else:
-                # Create a sub-progress bar with a total of 1 for this step.
-                sub_bar = tqdm(total=1, desc=msg, position=0, dynamic_ncols=True, leave=True)
-                sub_bar.update(1)
-                sub_bar.close()
-
-                # Update the overall progress bar.
-                overall_bar.update(1)
-                overall_bar.refresh()
+                # If there's a current sub-progress bar, mark it complete and close it.
+                if current_sub_bar is not None:
+                    current_sub_bar.update(1)
+                    current_sub_bar.close()
+                    overall_bar.update(1)
+                    overall_bar.refresh()
+                # Now create a new sub-progress bar for this new step.
+                # (It will remain visible until the next INFO message arrives.)
+                current_sub_bar = tqdm(total=1, desc=msg, position=2,
+                                       ncols=120, dynamic_ncols=False, leave=True)
         else:
-            print(stripped_line)
+            tqdm.write(stripped_line)
+
+    # When process ends, if there's an open sub-bar, finish it.
+    if current_sub_bar is not None:
+        current_sub_bar.update(1)
+        current_sub_bar.close()
+        overall_bar.update(1)
+        overall_bar.refresh()
 
     process.wait()
     if gen_progress_bar:
