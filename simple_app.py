@@ -149,7 +149,8 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
 
 with gr.Blocks() as demo:
     with gr.Column():
-        gr.Markdown("# Wan 2.1")
+        gr.Markdown("# Wan 2.1 1.3B")
+        gr.Markdown("Enjoy this simple working UI, duplicate the space to skip the queue :)")
         prompt = gr.Textbox(label="Prompt")
         submit_btn = gr.Button("Submit")
         video_res = gr.Video(label="Generated Video")
