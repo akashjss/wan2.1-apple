@@ -62,20 +62,16 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
 
         # Check for INFO lines.
         if "INFO:" in stripped_line:
-            # Split the line at "INFO:" to extract the message.
             parts = stripped_line.split("INFO:", 1)
             msg = parts[1].strip() if len(parts) > 1 else ""
-            # Print the log line.
-            print(stripped_line)
-            # Skip updating the overall bar for the first three (irrelevant) steps.
+            tqdm.write(stripped_line)  # Use tqdm.write() instead of print()
             if processed_steps < irrelevant_steps:
                 processed_steps += 1
             else:
                 overall_bar.update(1)
                 percentage = (overall_bar.n / overall_bar.total) * 100
-                overall_bar.set_description(f"Overall Process - {percentage:.1f}%")
-                overall_bar.set_postfix_str(msg)
-                print(msg)
+                # Combine percentage and INFO message into one description.
+                overall_bar.set_description(f"Overall Process - {percentage:.1f}% | {msg}")
                 overall_bar.refresh()
         else:
             # Print any other lines.
