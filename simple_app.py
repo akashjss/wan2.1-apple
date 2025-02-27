@@ -16,15 +16,15 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
     irrelevant_steps = 4
     relevant_steps = total_process_steps - irrelevant_steps  # 7 steps
 
-    # Overall progress bar for relevant steps (position=1 so it appears below the generation bar)
+    # Create an overall progress bar for the 9 relevant steps.
     overall_bar = tqdm(total=relevant_steps, desc="Overall Process", position=1, dynamic_ncols=True, leave=True)
     processed_steps = 0
 
     # Regex to extract the INFO message (everything after "INFO:")
     info_pattern = re.compile(r"\[.*?\]\s+INFO:\s+(.*)")
-    # Regex to capture video generation progress lines (e.g. " 10%|...| 5/50")
+    # Regex to capture video generation progress lines (e.g., " 10%|...| 5/50")
     progress_pattern = re.compile(r"(\d+)%\|.*\| (\d+)/(\d+)")
-
+    
     gen_progress_bar = None
 
     command = [
@@ -59,7 +59,7 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
             total = int(progress_match.group(3))
             if gen_progress_bar is None:
                 gen_progress_bar = tqdm(total=total, desc="Video Generation", position=0, dynamic_ncols=True, leave=True)
-            # Update video generation progress.
+            # Update the video generation progress bar
             gen_progress_bar.update(current - gen_progress_bar.n)
             gen_progress_bar.refresh()
             continue  # Skip further processing for progress lines
@@ -68,7 +68,7 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
         info_match = info_pattern.search(stripped_line)
         if info_match:
             msg = info_match.group(1)
-            # Always print the log line.
+            # Always print the log line (using tqdm.write so it doesn't interfere with the bars)
             tqdm.write(stripped_line)
             # For relevant steps (i.e. after the first three), update the overall progress.
             if processed_steps < irrelevant_steps:
@@ -76,7 +76,9 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
             else:
                 overall_bar.update(1)
                 percentage = (overall_bar.n / overall_bar.total) * 100
-                overall_bar.set_description(f"Overall Process - {percentage:.1f}% | {msg}")
+                # Update the description for the left part and set the postfix to the INFO message.
+                overall_bar.set_description(f"Overall Process - {percentage:.1f}%")
+                overall_bar.set_postfix_str(msg)
                 overall_bar.refresh()
         else:
             # For any other line, print it.
