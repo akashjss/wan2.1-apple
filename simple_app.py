@@ -19,9 +19,7 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
     overall_bar = tqdm(total=relevant_steps, desc="Overall Process", position=1, dynamic_ncols=True, leave=True)
     processed_steps = 0
 
-    # Regex to capture video generation progress lines (e.g., "10%|...| 5/50")
     progress_pattern = re.compile(r"(\d+)%\|.*\| (\d+)/(\d+)")
-    
     gen_progress_bar = None
 
     command = [
@@ -44,12 +42,14 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
         bufsize=1  # line-buffered
     )
 
+    last_msg = ""  # To store the last INFO message
+
     for line in iter(process.stdout.readline, ''):
         stripped_line = line.strip()
         if not stripped_line:
             continue
 
-        # First, check for video generation progress lines.
+        # Match video generation progress (e.g., "10%|...| 5/50")
         progress_match = progress_pattern.search(stripped_line)
         if progress_match:
             current = int(progress_match.group(2))
@@ -60,22 +60,29 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
             gen_progress_bar.refresh()
             continue
 
-        # Now, check for INFO lines in a case-insensitive way.
-        if "info:" in stripped_line.lower():
-            # Split on "INFO:" (in a case-insensitive manner) to get the text after it.
+        # Check for INFO lines and extract the message
+        if "INFO:" in stripped_line:
             parts = stripped_line.split("INFO:", 1)
             msg = parts[1].strip() if len(parts) > 1 else ""
-            # Print the log line.
-            tqdm.write(stripped_line)
-            # Skip updating the overall bar for the first three (irrelevant) steps.
+
+            # Debugging print to check extracted message
+            tqdm.write(f"Extracted INFO message: '{msg}'")
+
+            # Skip first three steps
             if processed_steps < irrelevant_steps:
                 processed_steps += 1
             else:
                 overall_bar.update(1)
                 percentage = (overall_bar.n / overall_bar.total) * 100
-                # Update the overall bar description with both the percentage and the extracted INFO message.
-                overall_bar.set_description(f"Overall Process - {percentage:.1f}% | {msg}")
+                last_msg = msg  # Store last INFO message
+
+                # Debugging print before updating description
+                tqdm.write(f"Updating description: Overall Process - {percentage:.1f}% | {last_msg}")
+
+                # Update progress bar description with INFO message
+                overall_bar.set_description(f"Overall Process - {percentage:.1f}% | {last_msg}")
                 overall_bar.refresh()
+
         else:
             tqdm.write(stripped_line)
 
