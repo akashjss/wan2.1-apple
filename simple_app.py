@@ -14,7 +14,7 @@ snapshot_download(
 
 def infer(prompt, progress=gr.Progress(track_tqdm=True)):
     
-    # Configuration:  
+    # Configuration:
     total_process_steps = 11          # Total steps (including irrelevant ones)
     irrelevant_steps = 4              # First 4 INFO messages are skipped  
     relevant_steps = total_process_steps - irrelevant_steps  # 7 overall steps
@@ -30,11 +30,12 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
 
     # Variables for sub-step progress bar (level 2)
     sub_bar = None
-    sub_time_elapsed = 0  # seconds elapsed for the current sub-step
-    video_phase = False   # flag indicating video generation phase
+    sub_ticks = 0  # Each tick represents 40ms
+    sub_tick_total = 500  # 500 ticks * 0.04 sec = 20 seconds
+    video_phase = False
 
     command = [
-        "python", "-u", "-m", "generate",  # -u: unbuffered output
+        "python", "-u", "-m", "generate",  # using -u for unbuffered output
         "--task", "t2v-1.3B",
         "--size", "832*480",
         "--ckpt_dir", "./Wan2.1-T2V-1.3B",
@@ -50,12 +51,10 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
                                text=True,
                                bufsize=1)
 
-    # Poll the process's stdout in a loop.
     while True:
-        # Wait up to 1 second for data.
-        rlist, _, _ = select.select([process.stdout], [], [], 1)
+        # Poll for new stdout data with a 40 ms timeout.
+        rlist, _, _ = select.select([process.stdout], [], [], 0.04)
         if rlist:
-            # New line is available.
             line = process.stdout.readline()
             if not line:
                 break
@@ -63,18 +62,18 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
             if not stripped_line:
                 continue
 
-            # Check if line matches video generation progress.
+            # Check for video generation progress (level 3).
             progress_match = progress_pattern.search(stripped_line)
             if progress_match:
-                # Enter video phase: if a sub-step is active, finish it.
+                # If a sub-step bar is active, finish it before entering video phase.
                 if sub_bar is not None:
-                    if sub_time_elapsed < 20:
-                        sub_bar.update(20 - sub_time_elapsed)
+                    if sub_ticks < sub_tick_total:
+                        sub_bar.update(sub_tick_total - sub_ticks)
                     sub_bar.close()
                     overall_bar.update(1)
                     overall_bar.refresh()
                     sub_bar = None
-                    sub_time_elapsed = 0
+                    sub_ticks = 0
                 video_phase = True
                 current = int(progress_match.group(2))
                 total = int(progress_match.group(3))
@@ -83,7 +82,6 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
                                               ncols=120, dynamic_ncols=True, leave=True)
                 video_progress_bar.update(current - video_progress_bar.n)
                 video_progress_bar.refresh()
-                # When video progress is complete, finish the video phase.
                 if video_progress_bar.n >= video_progress_bar.total:
                     video_phase = False
                     overall_bar.update(1)
@@ -92,57 +90,54 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
                     video_progress_bar = None
                 continue
 
-            # Process INFO messages.
+            # Process INFO messages (level 2 sub-step).
             if "INFO:" in stripped_line:
                 parts = stripped_line.split("INFO:", 1)
                 msg = parts[1].strip() if len(parts) > 1 else ""
-                # Print the log line.
-                print(stripped_line)
+                print(stripped_line)  # Print log line
 
                 if processed_steps < irrelevant_steps:
                     processed_steps += 1
                 else:
-                    # If we're in video phase, ignore new INFO messages.
+                    # If in video phase, ignore new INFO messages.
                     if video_phase:
                         continue
                     # If a sub-step is already active, finish it.
                     if sub_bar is not None:
-                        if sub_time_elapsed < 20:
-                            sub_bar.update(20 - sub_time_elapsed)
+                        if sub_ticks < sub_tick_total:
+                            sub_bar.update(sub_tick_total - sub_ticks)
                         sub_bar.close()
                         overall_bar.update(1)
                         overall_bar.refresh()
                         sub_bar = None
-                        sub_time_elapsed = 0
-                    # Start a new sub-step progress bar.
-                    sub_bar = tqdm(total=20, desc=msg, position=2,
+                        sub_ticks = 0
+                    # Start a new sub-step progress bar with total=500 ticks.
+                    sub_bar = tqdm(total=sub_tick_total, desc=msg, position=2,
                                    ncols=120, dynamic_ncols=False, leave=True)
-                    sub_time_elapsed = 0
+                    sub_ticks = 0
                 continue
             else:
                 print(stripped_line)
         else:
-            # No new data for 1 second.
+            # No new data within 40ms; update the sub-step progress bar.
             if sub_bar is not None:
                 sub_bar.update(1)
-                sub_time_elapsed += 1
+                sub_ticks += 1
                 sub_bar.refresh()
-                if sub_time_elapsed >= 20:
-                    # Complete this sub-step.
+                if sub_ticks >= sub_tick_total:
+                    # 20 seconds have elapsed; complete this sub-step.
                     sub_bar.close()
                     overall_bar.update(1)
                     overall_bar.refresh()
                     sub_bar = None
-                    sub_time_elapsed = 0
+                    sub_ticks = 0
 
-        # Exit loop if the process is finished.
         if process.poll() is not None:
             break
 
     # Drain any remaining output.
     for line in process.stdout:
         print(line.strip())
-
     process.wait()
     if video_progress_bar is not None:
         video_progress_bar.close()
