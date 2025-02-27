@@ -71,7 +71,7 @@ def infer(prompt, progress=gr.Progress(track_tqdm=True)):
                 overall_bar.update(1)
                 percentage = (overall_bar.n / overall_bar.total) * 100
                 # Combine percentage and INFO message into one description.
-                overall_bar.set_description(f"Overall Process - {percentage:.1f}% Michel")
+                overall_bar.desc = f"Overall Process MICHEL- {percentage:.1f}% | {msg}"
                 overall_bar.refresh()
         else:
             # Print any other lines.
