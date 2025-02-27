@@ -31,7 +31,7 @@ def infer(prompt):
 
     if result.returncode == 0:
         print("Command executed successfully.")
-        return "./tmp/generated_video.mp4"
+        return "generated_video.mp4"
     else:
         print("Error executing command.")
         raise gr.Error("Error executing command")
