@@ -1,6 +1,6 @@
 ---
 title: Wan2.1
-emoji: 📈
+emoji: ⚡
 colorFrom: pink
 colorTo: purple
 sdk: gradio
