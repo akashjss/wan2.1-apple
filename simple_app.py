@@ -151,6 +151,16 @@ with gr.Blocks() as demo:
     with gr.Column():
         gr.Markdown("# Wan 2.1 1.3B")
         gr.Markdown("Enjoy this simple working UI, duplicate the space to skip the queue :)")
+        gr.HTML("""
+        <div style="display:flex;column-gap:4px;">
+            <a href="https://huggingface.co/spaces/fffiloni/Wan2.1?duplicate=true">
+                <img src="https://huggingface.co/datasets/huggingface/badges/resolve/main/duplicate-this-space-sm.svg" alt="Duplicate this Space">
+            </a>
+            <a href="https://huggingface.co/fffiloni">
+                <img src="https://huggingface.co/datasets/huggingface/badges/resolve/main/follow-me-on-HF-sm-dark.svg" alt="Follow me on HF">
+            </a>
+        </div>
+        """)
         prompt = gr.Textbox(label="Prompt")
         submit_btn = gr.Button("Submit")
         video_res = gr.Video(label="Generated Video")
