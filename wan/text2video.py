@@ -23,6 +23,11 @@ from .utils.fm_solvers import (FlowDPMSolverMultistepScheduler,
 from .utils.fm_solvers_unipc import FlowUniPCMultistepScheduler
 
 
+def get_default_device():
+    if torch.backends.mps.is_available():
+        return torch.device('mps')
+    return torch.device('cpu')
+
 class WanT2V:
 
     def __init__(
@@ -57,7 +62,7 @@ class WanT2V:
             t5_cpu (`bool`, *optional*, defaults to False):
                 Whether to place T5 model on CPU. Only works without t5_fsdp.
         """
-        self.device = torch.device(f"cuda:{device_id}")
+        self.device = get_default_device()
         self.config = config
         self.rank = rank
         self.t5_cpu = t5_cpu
@@ -65,14 +70,14 @@ class WanT2V:
         self.num_train_timesteps = config.num_train_timesteps
         self.param_dtype = config.param_dtype
 
-        shard_fn = partial(shard_model, device_id=device_id)
+        shard_fn = partial(shard_model, device_id=device_id) if t5_fsdp or dit_fsdp else None
         self.text_encoder = T5EncoderModel(
             text_len=config.text_len,
             dtype=config.t5_dtype,
             device=torch.device('cpu'),
             checkpoint_path=os.path.join(checkpoint_dir, config.t5_checkpoint),
             tokenizer_path=os.path.join(checkpoint_dir, config.t5_tokenizer),
-            shard_fn=shard_fn if t5_fsdp else None)
+            shard_fn=shard_fn)
 
         self.vae_stride = config.vae_stride
         self.patch_size = config.patch_size

@@ -446,8 +446,8 @@ def _t5(name,
 
     # init tokenizer
     if return_tokenizer:
-        from .tokenizers import HuggingfaceTokenizer
-        tokenizer = HuggingfaceTokenizer(f'google/{name}', **tokenizer_kwargs)
+        from transformers import T5Tokenizer
+        tokenizer = T5Tokenizer.from_pretrained(f'google/{name}', **tokenizer_kwargs)
         return model, tokenizer
     else:
         return model
@@ -469,45 +469,85 @@ def umt5_xxl(**kwargs):
     return _t5('umt5-xxl', **cfg)
 
 
-class T5EncoderModel:
+def get_default_device():
+    if torch.cuda.is_available():
+        return torch.cuda.current_device()
+    elif torch.backends.mps.is_available():
+        return 'mps'
+    return 'cpu'
 
+
+class T5EncoderModel:
     def __init__(
         self,
         text_len,
         dtype=torch.bfloat16,
-        device=torch.cuda.current_device(),
+        device=None,
         checkpoint_path=None,
         tokenizer_path=None,
         shard_fn=None,
     ):
+        if device is None:
+            device = get_default_device()
+        
         self.text_len = text_len
         self.dtype = dtype
         self.device = device
-        self.checkpoint_path = checkpoint_path
-        self.tokenizer_path = tokenizer_path
 
-        # init model
-        model = umt5_xxl(
-            encoder_only=True,
-            return_tokenizer=False,
-            dtype=dtype,
-            device=device).eval().requires_grad_(False)
-        logging.info(f'loading {checkpoint_path}')
-        model.load_state_dict(torch.load(checkpoint_path, map_location='cpu'))
-        self.model = model
-        if shard_fn is not None:
-            self.model = shard_fn(self.model, sync_module_states=False)
+        # Initialize model and tokenizer separately
+        self.model = T5Encoder(
+            vocab=256384,  # UMT5-XXL vocab size
+            dim=4096,
+            dim_attn=4096,
+            dim_ffn=10240,
+            num_heads=64,
+            num_layers=24,
+            num_buckets=32,
+            shared_pos=False,
+            dropout=0.1
+        )
+        
+        if checkpoint_path is not None:
+            state_dict = torch.load(checkpoint_path, map_location='cpu')
+            if shard_fn is not None:
+                state_dict = shard_fn(state_dict)
+            self.model.load_state_dict(state_dict)
+
+        # Initialize tokenizer
+        if tokenizer_path is not None:
+            from transformers import T5Tokenizer
+            self.tokenizer = T5Tokenizer.from_pretrained(
+                tokenizer_path,
+                model_max_length=text_len,
+                padding_side='right',
+                truncation_side='right'
+            )
         else:
-            self.model.to(self.device)
-        # init tokenizer
-        self.tokenizer = HuggingfaceTokenizer(
-            name=tokenizer_path, seq_len=text_len, clean='whitespace')
+            self.tokenizer = None
 
-    def __call__(self, texts, device):
-        ids, mask = self.tokenizer(
-            texts, return_mask=True, add_special_tokens=True)
-        ids = ids.to(device)
-        mask = mask.to(device)
-        seq_lens = mask.gt(0).sum(dim=1).long()
-        context = self.model(ids, mask)
-        return [u[:v] for u, v in zip(context, seq_lens)]
+    def __call__(self, texts, device=None):
+        if device is None:
+            device = self.device
+            
+        if isinstance(texts, str):
+            texts = [texts]
+            
+        # Tokenize texts
+        if self.tokenizer is None:
+            raise ValueError("Tokenizer not initialized. Please provide tokenizer_path during initialization.")
+            
+        tokens = self.tokenizer(
+            texts,
+            padding=True,
+            truncation=True,
+            max_length=self.text_len,
+            return_tensors='pt'
+        )
+        
+        input_ids = tokens['input_ids'].to(device)
+        attention_mask = tokens['attention_mask'].to(device)
+        
+        # Forward pass through encoder
+        hidden_states = self.model(input_ids, attention_mask)
+        
+        return hidden_states, attention_mask

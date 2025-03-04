@@ -206,11 +206,17 @@ def _init_logging(rank):
         logging.basicConfig(level=logging.ERROR)
 
 
+def get_default_device():
+    if torch.backends.mps.is_available():
+        return torch.device('mps')
+    return torch.device('cpu')
+
+
 def generate(args):
     rank = int(os.getenv("RANK", 0))
     world_size = int(os.getenv("WORLD_SIZE", 1))
     local_rank = int(os.getenv("LOCAL_RANK", 0))
-    device = local_rank
+    device = get_default_device()
     _init_logging(rank)
 
     if args.offload_model is None:

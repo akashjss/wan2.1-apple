@@ -484,115 +484,87 @@ class WanVAE_(nn.Module):
 
     def __init__(self,
                  dim=128,
-                 z_dim=4,
+                 z_dim=16,
                  dim_mult=[1, 2, 4, 4],
                  num_res_blocks=2,
                  attn_scales=[],
                  temperal_downsample=[True, True, False],
                  dropout=0.0):
-        super().__init__()
+        super(WanVAE_, self).__init__()
         self.dim = dim
         self.z_dim = z_dim
         self.dim_mult = dim_mult
         self.num_res_blocks = num_res_blocks
         self.attn_scales = attn_scales
         self.temperal_downsample = temperal_downsample
-        self.temperal_upsample = temperal_downsample[::-1]
+        self.dropout = dropout
 
-        # modules
-        self.encoder = Encoder3d(dim, z_dim * 2, dim_mult, num_res_blocks,
-                                 attn_scales, self.temperal_downsample, dropout)
-        self.conv1 = CausalConv3d(z_dim * 2, z_dim * 2, 1)
-        self.conv2 = CausalConv3d(z_dim, z_dim, 1)
-        self.decoder = Decoder3d(dim, z_dim, dim_mult, num_res_blocks,
-                                 attn_scales, self.temperal_upsample, dropout)
+        # layers
+        self.encoder = Encoder3d(
+            dim=dim,
+            z_dim=z_dim * 2,  # For mean and variance
+            dim_mult=dim_mult,
+            num_res_blocks=num_res_blocks,
+            attn_scales=attn_scales,
+            temperal_downsample=temperal_downsample,
+            dropout=dropout)
+        self.decoder = Decoder3d(
+            dim=dim,
+            z_dim=z_dim,
+            dim_mult=dim_mult,
+            num_res_blocks=num_res_blocks,
+            attn_scales=attn_scales,
+            temperal_upsample=temperal_downsample,
+            dropout=dropout)
 
     def forward(self, x):
-        mu, log_var = self.encode(x)
+        mu, log_var = self.encoder(x).chunk(2, dim=1)
         z = self.reparameterize(mu, log_var)
-        x_recon = self.decode(z)
-        return x_recon, mu, log_var
+        x = self.decoder(z)
+        return x
 
-    def encode(self, x, scale):
-        self.clear_cache()
-        ## cache
-        t = x.shape[2]
-        iter_ = 1 + (t - 1) // 4
-        ## 对encode输入的x，按时间拆分为1、4、4、4....
-        for i in range(iter_):
-            self._enc_conv_idx = [0]
-            if i == 0:
-                out = self.encoder(
-                    x[:, :, :1, :, :],
-                    feat_cache=self._enc_feat_map,
-                    feat_idx=self._enc_conv_idx)
+    def encode(self, x, scale=None):
+        mu, log_var = self.encoder(x).chunk(2, dim=1)
+        if scale is not None:
+            if isinstance(scale[0], torch.Tensor):
+                mu = (mu - scale[0].view(1, self.z_dim, 1, 1, 1)) * scale[1].view(
+                    1, self.z_dim, 1, 1, 1)
             else:
-                out_ = self.encoder(
-                    x[:, :, 1 + 4 * (i - 1):1 + 4 * i, :, :],
-                    feat_cache=self._enc_feat_map,
-                    feat_idx=self._enc_conv_idx)
-                out = torch.cat([out, out_], 2)
-        mu, log_var = self.conv1(out).chunk(2, dim=1)
-        if isinstance(scale[0], torch.Tensor):
-            mu = (mu - scale[0].view(1, self.z_dim, 1, 1, 1)) * scale[1].view(
-                1, self.z_dim, 1, 1, 1)
-        else:
-            mu = (mu - scale[0]) * scale[1]
-        self.clear_cache()
-        return mu
+                mu = (mu - scale[0]) * scale[1]
+        return mu, log_var
 
-    def decode(self, z, scale):
-        self.clear_cache()
-        # z: [b,c,t,h,w]
-        if isinstance(scale[0], torch.Tensor):
-            z = z / scale[1].view(1, self.z_dim, 1, 1, 1) + scale[0].view(
-                1, self.z_dim, 1, 1, 1)
-        else:
-            z = z / scale[1] + scale[0]
-        iter_ = z.shape[2]
-        x = self.conv2(z)
-        for i in range(iter_):
-            self._conv_idx = [0]
-            if i == 0:
-                out = self.decoder(
-                    x[:, :, i:i + 1, :, :],
-                    feat_cache=self._feat_map,
-                    feat_idx=self._conv_idx)
+    def decode(self, z, scale=None):
+        if scale is not None:
+            if isinstance(scale[0], torch.Tensor):
+                z = z / scale[1].view(1, self.z_dim, 1, 1, 1) + scale[0].view(
+                    1, self.z_dim, 1, 1, 1)
             else:
-                out_ = self.decoder(
-                    x[:, :, i:i + 1, :, :],
-                    feat_cache=self._feat_map,
-                    feat_idx=self._conv_idx)
-                out = torch.cat([out, out_], 2)
-        self.clear_cache()
-        return out
+                z = z / scale[1] + scale[0]
+        x = self.decoder(z)
+        return x
 
     def reparameterize(self, mu, log_var):
         std = torch.exp(0.5 * log_var)
         eps = torch.randn_like(std)
-        return eps * std + mu
+        return mu + eps * std
 
     def sample(self, imgs, deterministic=False):
         mu, log_var = self.encode(imgs)
         if deterministic:
             return mu
-        std = torch.exp(0.5 * log_var.clamp(-30.0, 20.0))
-        return mu + std * torch.randn_like(std)
-
-    def clear_cache(self):
-        self._conv_num = count_conv3d(self.decoder)
-        self._conv_idx = [0]
-        self._feat_map = [None] * self._conv_num
-        #cache encode
-        self._enc_conv_num = count_conv3d(self.encoder)
-        self._enc_conv_idx = [0]
-        self._enc_feat_map = [None] * self._enc_conv_num
+        return self.reparameterize(mu, log_var)
 
 
-def _video_vae(pretrained_path=None, z_dim=None, device='cpu', **kwargs):
-    """
-    Autoencoder3d adapted from Stable Diffusion 1.x, 2.x and XL.
-    """
+def get_default_device():
+    if torch.backends.mps.is_available():
+        return torch.device('mps')
+    return torch.device('cpu')
+
+
+def _video_vae(pretrained_path=None, z_dim=16, device=None, **kwargs):
+    if device is None:
+        device = get_default_device()
+    
     # params
     cfg = dict(
         dim=96,
@@ -603,46 +575,35 @@ def _video_vae(pretrained_path=None, z_dim=None, device='cpu', **kwargs):
         temperal_downsample=[False, True, True],
         dropout=0.0)
     cfg.update(**kwargs)
-
-    # init model
-    with torch.device('meta'):
-        model = WanVAE_(**cfg)
-
+    
+    # create model
+    model = WanVAE_(**cfg)
+    
     # load checkpoint
-    logging.info(f'loading {pretrained_path}')
-    model.load_state_dict(
-        torch.load(pretrained_path, map_location=device), assign=True)
-
+    if pretrained_path is not None:
+        state_dict = torch.load(pretrained_path, map_location='cpu')
+        # Filter out unexpected keys and ignore missing ones
+        model_dict = model.state_dict()
+        state_dict = {k: v for k, v in state_dict.items() if k in model_dict}
+        model_dict.update(state_dict)
+        model.load_state_dict(model_dict, strict=False)
+    
+    # set device and eval mode
+    model = model.to(device=device)
+    model.eval()
     return model
 
 
-class WanVAE:
+class WanVAE(nn.Module):
 
-    def __init__(self,
-                 z_dim=16,
-                 vae_pth='cache/vae_step_411000.pth',
-                 dtype=torch.float,
-                 device="cuda"):
-        self.dtype = dtype
+    def __init__(self, vae_pth=None, device=None, z_dim=16):
+        super(WanVAE, self).__init__()
+        if device is None:
+            device = get_default_device()
+        
         self.device = device
-
-        mean = [
-            -0.7571, -0.7089, -0.9113, 0.1075, -0.1745, 0.9653, -0.1517, 1.5508,
-            0.4134, -0.0715, 0.5517, -0.3632, -0.1922, -0.9497, 0.2503, -0.2921
-        ]
-        std = [
-            2.8184, 1.4541, 2.3275, 2.6558, 1.2196, 1.7708, 2.6052, 2.0743,
-            3.2687, 2.1526, 2.8652, 1.5579, 1.6382, 1.1253, 2.8251, 1.9160
-        ]
-        self.mean = torch.tensor(mean, dtype=dtype, device=device)
-        self.std = torch.tensor(std, dtype=dtype, device=device)
-        self.scale = [self.mean, 1.0 / self.std]
-
-        # init model
-        self.model = _video_vae(
-            pretrained_path=vae_pth,
-            z_dim=z_dim,
-        ).eval().requires_grad_(False).to(device)
+        self.model = _video_vae(pretrained_path=vae_pth, z_dim=z_dim, device=device)
+        self.model.eval().requires_grad_(False)
 
     def encode(self, videos):
         """

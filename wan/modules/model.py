@@ -16,7 +16,7 @@ def sinusoidal_embedding_1d(dim, position):
     # preprocess
     assert dim % 2 == 0
     half = dim // 2
-    position = position.type(torch.float64)
+    position = position.type(torch.float32)
 
     # calculation
     sinusoid = torch.outer(
@@ -358,6 +358,12 @@ class MLPProj(torch.nn.Module):
         return clip_extra_context_tokens
 
 
+def get_default_device():
+    if torch.backends.mps.is_available():
+        return torch.device('mps')
+    return torch.device('cpu')
+
+
 class WanModel(ModelMixin, ConfigMixin):
     r"""
     Wan diffusion backbone supporting both text-to-video and image-to-video.
@@ -367,6 +373,30 @@ class WanModel(ModelMixin, ConfigMixin):
         'patch_size', 'cross_attn_norm', 'qk_norm', 'text_dim', 'window_size'
     ]
     _no_split_modules = ['WanAttentionBlock']
+
+    @classmethod
+    def from_pretrained(cls, pretrained_model_path, **kwargs):
+        device = get_default_device()
+        """Load model from local safetensors file."""
+        from safetensors.torch import load_file
+        import os
+
+        config_file = os.path.join(pretrained_model_path, "config.json")
+        model_file = os.path.join(pretrained_model_path, "diffusion_pytorch_model.safetensors")
+        
+        if not os.path.exists(model_file):
+            raise ValueError(f"Model file not found at {model_file}")
+            
+        # Load config and create model
+        config = cls.load_config(config_file)
+        model = cls(**config)
+        
+        # Load state dict from safetensors
+        state_dict = load_file(model_file)
+        model.load_state_dict(state_dict)
+        
+        model = model.to(device)
+        return model
 
     @register_to_config
     def __init__(self,
@@ -540,12 +570,23 @@ class WanModel(ModelMixin, ConfigMixin):
 
         # context
         context_lens = None
-        context = self.text_embedding(
-            torch.stack([
-                torch.cat(
-                    [u, u.new_zeros(self.text_len - u.size(0), u.size(1))])
-                for u in context
-            ]))
+        if isinstance(context[0], tuple):
+            # Handle tuple case (hidden_states, attention_mask)
+            hidden_states = [c[0] for c in context]
+            context = self.text_embedding(
+                torch.stack([
+                    torch.cat(
+                        [u, u.new_zeros(self.text_len - u.size(0), u.size(1))])
+                    for u in hidden_states
+                ]))
+        else:
+            # Handle tensor case
+            context = self.text_embedding(
+                torch.stack([
+                    torch.cat(
+                        [u, u.new_zeros(self.text_len - u.size(0), u.size(1))])
+                    for u in context
+                ]))
 
         if clip_fea is not None:
             context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
